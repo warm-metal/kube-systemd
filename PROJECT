@@ -1,0 +1,5 @@
+domain: systemd.warmmetal.tech
+layout: go.kubebuilder.io/v3
+projectName: kube-systemd
+repo: github.com/warm-metal/kube-systemd
+version: 3-alpha
