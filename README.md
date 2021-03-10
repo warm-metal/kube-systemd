@@ -9,26 +9,26 @@ With clusters like minikube on hyberkit, which boot always from an ISO,
 
 ```yaml
 type Unit struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   UnitSpec   `json:"spec,omitempty"`
-	Status UnitStatus `json:"status,omitempty"`
+    Spec   UnitSpec   `json:"spec,omitempty"`
+    Status UnitStatus `json:"status,omitempty"`
 }
 
 type UnitSpec struct {
-	// Path defines the absolute path on the host of the unit.
-	Path string `json:"path,omitempty"`
+    // Path defines the absolute path on the host of the unit.
+    Path string `json:"path,omitempty"`
 
-	// Definition specifies the unit definition. If set, it is written to the unit configuration which Path defines.
-	// Or, the original unit on the host will be used.
-	// +optional
-	Definition string `json:"definition,omitempty"`
+    // Definition specifies the unit definition. If set, it is written to the unit configuration which Path defines.
+    // Or, the original unit on the host will be used.
+    // +optional
+    Definition string `json:"definition,omitempty"`
 
-	// Config specifies config files and contents on the host with respect to the systemd unit.
-	// The key is the absolute path of the configuration file. And, the value is the file content.
-	// +optional
-	Config map[string]string `json:"config,omitempty"`
+    // Config specifies config files and contents on the host with respect to the systemd unit.
+    // The key is the absolute path of the configuration file. And, the value is the file content.
+    // +optional
+    Config map[string]string `json:"config,omitempty"`
 }
 ```
 
