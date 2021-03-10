@@ -6,7 +6,7 @@ metadata:
   name: system
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: controller-manager
   namespace: system
@@ -16,23 +16,20 @@ spec:
   selector:
     matchLabels:
       control-plane: controller-manager
-  replicas: 1
   template:
     metadata:
       labels:
         control-plane: controller-manager
     spec:
-      securityContext:
-        runAsUser: 65532
       containers:
       - command:
         - /manager
         args:
-        - --leader-elect
         image: controller:latest
+        imagePullPolicy: IfNotPresent
         name: manager
         securityContext:
-          allowPrivilegeEscalation: false
+          privileged: true
         livenessProbe:
           httpGet:
             path: /healthz
@@ -52,4 +49,29 @@ spec:
           requests:
             cpu: 100m
             memory: 20Mi
-      terminationGracePeriodSeconds: 10
+        volumeMounts:
+          - mountPath: /etc
+            name: systemd-config
+          - mountPath: /lib/systemd
+            name: systemd-lib
+          - mountPath: /etc/systemd
+            name: systemd-etc
+          - mountPath: /run/systemd
+            name: systemd-run
+      volumes:
+        - hostPath:
+            path: /etc
+            type: Directory
+          name: systemd-config
+        - hostPath:
+            path: /lib/systemd
+            type: Directory
+          name: systemd-lib
+        - hostPath:
+            path: /etc/systemd
+            type: Directory
+          name: systemd-etc
+        - hostPath:
+            path: /run/systemd
+            type: Directory
+          name: systemd-run

@@ -18,6 +18,14 @@ package controllers
 
 import (
 	"context"
+	"golang.org/x/xerrors"
+	"io/ioutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,7 +40,15 @@ type UnitReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+
+	Executed map[string]bool
 }
+
+const (
+	configurationDir = "/etc"
+	libSystemdDir    = "/lib/systemd"
+	etcSystemdDir    = "/etc/systemd"
+)
 
 //+kubebuilder:rbac:groups=core.systemd.warmmetal.tech,resources=units,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core.systemd.warmmetal.tech,resources=units/status,verbs=get;update;patch
@@ -50,9 +66,80 @@ type UnitReconciler struct {
 func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = r.Log.WithValues("unit", req.NamespacedName)
 
-	// your logic here
+	list := &corev1.UnitList{}
+	if err := r.List(ctx, list); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	nextUnits := make([]*corev1.Unit, 0, len(list.Items))
+	for i := range list.Items {
+		if !r.Executed[list.Items[i].Name] {
+			nextUnits = append(nextUnits, &list.Items[i])
+		}
+	}
+
+	sort.Slice(nextUnits, func(i, j int) bool {
+		return nextUnits[i].Name < nextUnits[j].Name
+	})
+
+	now := metav1.Now()
+	for i := range nextUnits {
+		unit := nextUnits[i]
+		unit.Status.ExecTimestamp = now
+		err := startUnit(ctx, unit)
+		if err != nil {
+			unit.Status.Error = err.Error()
+		}
+
+		if err := r.Status().Update(ctx, unit); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		r.Executed[unit.Name] = true
+	}
 
 	return ctrl.Result{}, nil
+}
+
+func startUnit(ctx context.Context, unit *corev1.Unit) error {
+	if len(unit.Spec.Path) == 0 {
+		return xerrors.New("Spec.Path is required")
+	}
+
+	if !strings.HasPrefix(unit.Spec.Path, libSystemdDir) && !strings.HasPrefix(unit.Spec.Path, etcSystemdDir) {
+		return xerrors.Errorf("Spec.Path must be in directory %q or %q", libSystemdDir, etcSystemdDir)
+	}
+
+	if len(unit.Spec.Definition) > 0 {
+		if err := ioutil.WriteFile(unit.Spec.Path, []byte(unit.Spec.Definition), 0644); err != nil {
+			return xerrors.Errorf("unable to write unit file %q: %s", unit.Spec.Path, err)
+		}
+	}
+
+	for path, content := range unit.Spec.Config {
+		if !strings.HasPrefix(path, configurationDir) {
+			return xerrors.Errorf("config must be in directory %q", configurationDir)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return xerrors.Errorf("unable to create dir %q: %s", path, err)
+		}
+
+		if err := ioutil.WriteFile(path, []byte(content), 0644); err != nil {
+			return xerrors.Errorf("unable to write config %q: %s", path, err)
+		}
+	}
+
+	systemctl := exec.CommandContext(ctx, "systemctl", "restart", filepath.Base(unit.Spec.Path))
+	if err := systemctl.Start(); err != nil {
+		return xerrors.Errorf("unable to restart service %q", filepath.Base(unit.Spec.Path))
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

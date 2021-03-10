@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= docker.io/warmmetal/kube-systemd-controller:v0.1.0
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
 
@@ -49,6 +49,9 @@ undeploy:
 manifests: controller-gen
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+dump-manifest: manifests kustomize
+	$(KUSTOMIZE) build config/default > config/samples/install.yaml
+
 # Run go fmt against code
 fmt:
 	go fmt ./...
@@ -62,8 +65,8 @@ generate: controller-gen
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 # Build the docker image
-docker-build: test
-	docker build -t ${IMG} .
+docker-build:
+	kubectl dev build -t ${IMG} .
 
 # Push the docker image
 docker-push:

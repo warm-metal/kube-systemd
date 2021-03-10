@@ -28,18 +28,37 @@ type UnitSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of Unit. Edit unit_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Path defines the absolute path on the host of the unit.
+	Path string `json:"path,omitempty"`
+
+	// Definition specifies the unit definition. If set, it is written to the unit configuration which Path defines.
+	// Or, the original unit on the host will be used.
+	// +optional
+	Definition string `json:"definition,omitempty"`
+
+	// Config specifies config files and contents on the host with respect to the systemd unit.
+	// The key is the absolute path of the configuration file. And, the value is the file content.
+	// +optional
+	Config map[string]string `json:"config,omitempty"`
 }
 
 // UnitStatus defines the observed state of Unit
 type UnitStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// Timestamp of the last execution
+	// +optional
+	ExecTimestamp metav1.Time `json:"execTimestamp,omitempty"`
+
+	// Specify Errors on reconcile
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:scope=Cluster
 
 // Unit is the Schema for the units API
 type Unit struct {
