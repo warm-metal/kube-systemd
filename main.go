@@ -19,6 +19,8 @@ package main
 import (
 	"flag"
 	"os"
+	"syscall"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -72,11 +74,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	var sys syscall.Sysinfo_t
+	if err := syscall.Sysinfo(&sys); err != nil {
+		setupLog.Error(err, "unable to fetch the system uptime")
+		os.Exit(1)
+	}
+
 	if err = (&controllers.UnitReconciler{
-		Client:   mgr.GetClient(),
-		Log:      ctrl.Log.WithName("controllers").WithName("Unit"),
-		Scheme:   mgr.GetScheme(),
-		Executed: make(map[string]bool),
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("Unit"),
+		Scheme:    mgr.GetScheme(),
+		SysUpTime: time.Now().Add(-1 * time.Duration(sys.Uptime) * time.Second),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Unit")
 		os.Exit(1)

@@ -267,7 +267,7 @@ spec:
         - --metrics-bind-address=127.0.0.1:8080
         command:
         - /manager
-        image: docker.io/warmmetal/kube-systemd-controller:v0.1.0
+        image: docker.io/warmmetal/kube-systemd-controller:v0.1.1
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
