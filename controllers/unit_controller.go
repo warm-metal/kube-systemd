@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,7 +42,7 @@ type UnitReconciler struct {
 	Log    logr.Logger
 	Scheme *runtime.Scheme
 
-	Executed map[string]bool
+	SysUpTime time.Time
 }
 
 const (
@@ -73,7 +74,8 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	nextUnits := make([]*corev1.Unit, 0, len(list.Items))
 	for i := range list.Items {
-		if !r.Executed[list.Items[i].Name] {
+		unit := list.Items[i]
+		if len(unit.Status.Error) > 0 || !unit.Status.ExecTimestamp.After(r.SysUpTime) {
 			nextUnits = append(nextUnits, &list.Items[i])
 		}
 	}
@@ -86,6 +88,11 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	for i := range nextUnits {
 		unit := nextUnits[i]
 		unit.Status.ExecTimestamp = now
+		// It may lead to the container exit to restart some unit
+		if err := r.Status().Update(ctx, unit); err != nil {
+			return ctrl.Result{}, err
+		}
+
 		err := startUnit(ctx, unit)
 		if err != nil {
 			unit.Status.Error = err.Error()
@@ -98,8 +105,6 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-
-		r.Executed[unit.Name] = true
 	}
 
 	return ctrl.Result{}, nil
