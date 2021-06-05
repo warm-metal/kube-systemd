@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= docker.io/warmmetal/kube-systemd-controller:v0.1.1
+IMG ?= docker.io/warmmetal/kube-systemd-controller:v0.2.0
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
 
@@ -22,7 +22,7 @@ test: generate fmt vet manifests
 
 # Build manager binary
 manager: generate fmt vet
-	go build -o bin/manager main.go
+	GOOS=linux go build -o bin/manager main.go
 
 # Run against the configured Kubernetes cluster in ~/.kube/config
 run: generate fmt vet manifests
@@ -54,11 +54,11 @@ dump-manifest: manifests kustomize
 
 # Run go fmt against code
 fmt:
-	go fmt ./...
+	GOOS=linux go fmt ./...
 
 # Run go vet against code
 vet:
-	go vet ./...
+	GOOS=linux go vet ./...
 
 # Generate code
 generate: controller-gen

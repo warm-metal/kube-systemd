@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,6 +29,16 @@ type UnitSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	// Specify an existed job which will restart once node boots up.
+	// +optional
+	Job corev1.ObjectReference `json:"job,omitempty"`
+
+	// Defines a systemd unit.
+	// +optional
+	HostUnit HostSystemdUnit `json:"unit,omitempty"`
+}
+
+type HostSystemdUnit struct {
 	// Path defines the absolute path on the host of the unit.
 	Path string `json:"path,omitempty"`
 
@@ -59,6 +70,10 @@ type UnitStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:scope=Cluster
+//+kubebuilder:printcolumn:name="Job",type=string,JSONPath=`.spec.job`
+//+kubebuilder:printcolumn:name="HostUnit",type=string,JSONPath=`.spec.unit.path`
+//+kubebuilder:printcolumn:name="ExecAGE",type=date,JSONPath=`.status.execTimestamp`
+//+kubebuilder:printcolumn:name="Error",type=string,JSONPath=`.status.error`
 
 // Unit is the Schema for the units API
 type Unit struct {

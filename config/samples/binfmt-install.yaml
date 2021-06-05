@@ -1,0 +1,9 @@
+apiVersion: core.systemd.warmmetal.tech/v1
+kind: Unit
+metadata:
+  name: binfmt-register
+spec:
+  job:
+    kind: Job
+    name: binfmt-register
+    namespace: default
