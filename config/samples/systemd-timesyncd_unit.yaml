@@ -1,0 +1,11 @@
+apiVersion: core.systemd.warmmetal.tech/v1
+kind: Unit
+metadata:
+  name: systemd-timesyncd.service
+spec:
+  unit:
+    path: "/lib/systemd/system/systemd-timesyncd.service"
+    config:
+      "/etc/systemd/timesyncd.conf": |
+        [Time]
+        NTP=ntp1.aliyun.com

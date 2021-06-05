@@ -20,7 +20,11 @@ import (
 	"context"
 	"golang.org/x/xerrors"
 	"io/ioutil"
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +55,8 @@ const (
 	etcSystemdDir    = "/etc/systemd"
 )
 
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete;deletecollection
+//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=get;list;watch
 //+kubebuilder:rbac:groups=core.systemd.warmmetal.tech,resources=units,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core.systemd.warmmetal.tech,resources=units/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=core.systemd.warmmetal.tech,resources=units/finalizers,verbs=update
@@ -93,9 +99,18 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return ctrl.Result{}, err
 		}
 
-		err := startUnit(ctx, unit)
+		updatedUnit := corev1.Unit{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(unit), &updatedUnit); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		unit = &updatedUnit
+
+		err := r.startUnit(ctx, unit)
 		if err != nil {
 			unit.Status.Error = err.Error()
+		} else {
+			unit.Status.Error = ""
 		}
 
 		if err := r.Status().Update(ctx, unit); err != nil {
@@ -103,6 +118,10 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		if err != nil {
+			if err == errRunning {
+				err = nil
+			}
+
 			return ctrl.Result{}, err
 		}
 	}
@@ -110,22 +129,108 @@ func (r *UnitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-func startUnit(ctx context.Context, unit *corev1.Unit) error {
-	if len(unit.Spec.Path) == 0 {
-		return xerrors.New("Spec.Path is required")
+func (r *UnitReconciler) startUnit(ctx context.Context, unit *corev1.Unit) error {
+	if unit.Spec.Job.Namespace != "" && unit.Spec.Job.Name != "" {
+		return r.restartJob(ctx, unit)
+	} else if unit.Spec.HostUnit.Path != "" {
+		return execHostUnit(ctx, &unit.Spec.HostUnit)
+	} else {
+		return xerrors.New("Job or HostUnit is required")
+	}
+}
+
+var (
+	enabled    = true
+	errRunning = xerrors.New("Running")
+)
+
+func (r *UnitReconciler) restartJob(ctx context.Context, unit *corev1.Unit) error {
+	job := batchv1.Job{}
+	r.Log.Info("fetch job", "name", unit.Spec.Job.Name, "namespace", unit.Spec.Job.Namespace)
+	err := r.Get(ctx, client.ObjectKey{Namespace: unit.Spec.Job.Namespace, Name: unit.Spec.Job.Name}, &job)
+	if err != nil {
+		return err
 	}
 
-	if !strings.HasPrefix(unit.Spec.Path, libSystemdDir) && !strings.HasPrefix(unit.Spec.Path, etcSystemdDir) {
-		return xerrors.Errorf("Spec.Path must be in directory %q or %q", libSystemdDir, etcSystemdDir)
+	r.Log.Info("job status", "succeeded", job.Status.Succeeded,
+		"failed", job.Status.Failed, "completeAt", job.Status.CompletionTime)
+
+	if job.Status.Succeeded > 0 && job.Status.Failed == 0 && job.Status.CompletionTime != nil && job.Status.CompletionTime.After(r.SysUpTime) {
+		return nil
 	}
 
-	if len(unit.Spec.Definition) > 0 {
-		if err := ioutil.WriteFile(unit.Spec.Path, []byte(unit.Spec.Definition), 0644); err != nil {
-			return xerrors.Errorf("unable to write unit file %q: %s", unit.Spec.Path, err)
+	podName := job.Name + "-systemd"
+	pod := v1.Pod{}
+	if err = r.Get(ctx, client.ObjectKey{Namespace: unit.Spec.Job.Namespace, Name: podName}, &pod); err == nil {
+		r.Log.Info("got pod", "pod", podName, "phase", pod.Status.Phase)
+		if pod.CreationTimestamp.Time.Before(r.SysUpTime) ||
+			(pod.Status.Phase == v1.PodFailed && pod.Status.StartTime != nil && time.Now().Sub(pod.Status.StartTime.Time) > time.Minute) {
+			r.Log.Info("pod was created before node restarting. will delete and create a new one")
+			if err = r.Delete(ctx, &pod); err != nil {
+				return err
+			}
+
+			// force creating a new pod
+			err = errors.NewNotFound(schema.GroupResource{
+				Group:    pod.GroupVersionKind().Group,
+				Resource: pod.Kind,
+			}, pod.Name)
 		}
 	}
 
-	for path, content := range unit.Spec.Config {
+	if err != nil {
+		r.Log.Info("create pod", "pod", podName, "fetchErr", err)
+		pod = v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: job.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         unit.APIVersion,
+						Kind:               unit.Kind,
+						Name:               unit.Name,
+						UID:                unit.UID,
+						Controller:         &enabled,
+						BlockOwnerDeletion: &enabled,
+					},
+				},
+			},
+			Spec: job.Spec.Template.Spec,
+		}
+
+		if err := r.Create(ctx, &pod); err != nil {
+			return err
+		}
+
+		return errRunning
+	}
+
+	if pod.Status.Phase == v1.PodSucceeded {
+		if err = r.Delete(ctx, &pod); err != nil {
+			r.Log.Error(err, "unable to delete pod", "pod", pod.Name)
+		}
+		return nil
+	}
+
+	if pod.Status.Phase == v1.PodFailed {
+		return xerrors.New(pod.Status.Reason)
+	}
+
+	return errRunning
+}
+
+func execHostUnit(ctx context.Context, unit *corev1.HostSystemdUnit) error {
+	if !strings.HasPrefix(unit.Path, libSystemdDir) && !strings.HasPrefix(unit.Path, etcSystemdDir) {
+		return xerrors.Errorf("Spec.Path must be in directory %q or %q", libSystemdDir, etcSystemdDir)
+	}
+
+	if len(unit.Definition) > 0 {
+		if err := ioutil.WriteFile(unit.Path, []byte(unit.Definition), 0644); err != nil {
+			return xerrors.Errorf("unable to write unit file %q: %s", unit.Path, err)
+		}
+	}
+
+	for path, content := range unit.Config {
 		if !strings.HasPrefix(path, configurationDir) {
 			return xerrors.Errorf("config must be in directory %q", configurationDir)
 		}
@@ -139,9 +244,9 @@ func startUnit(ctx context.Context, unit *corev1.Unit) error {
 		}
 	}
 
-	systemctl := exec.CommandContext(ctx, "systemctl", "restart", filepath.Base(unit.Spec.Path))
+	systemctl := exec.CommandContext(ctx, "systemctl", "restart", filepath.Base(unit.Path))
 	if err := systemctl.Start(); err != nil {
-		return xerrors.Errorf("unable to restart service %q", filepath.Base(unit.Spec.Path))
+		return xerrors.Errorf("unable to restart service %q", filepath.Base(unit.Path))
 	}
 
 	return nil
@@ -151,5 +256,6 @@ func startUnit(ctx context.Context, unit *corev1.Unit) error {
 func (r *UnitReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Unit{}).
+		Owns(&v1.Pod{}).
 		Complete(r)
 }

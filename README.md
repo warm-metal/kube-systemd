@@ -6,6 +6,7 @@ With clusters like minikube on hyberkit, which boot always from an ISO,
 **kube-systemd** could save configurations of systemd services and apply them after nodes started.
 
 **kube-systemd** introduces CRD Unit to save all configurations.
+Users can also set a job instead. The job will restart just after each node boot. 
 
 ```yaml
 type Unit struct {
@@ -17,18 +18,31 @@ type Unit struct {
 }
 
 type UnitSpec struct {
-    // Path defines the absolute path on the host of the unit.
-    Path string `json:"path,omitempty"`
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
 
-    // Definition specifies the unit definition. If set, it is written to the unit configuration which Path defines.
-    // Or, the original unit on the host will be used.
-    // +optional
-    Definition string `json:"definition,omitempty"`
+	// Specify an existed job which will restart once node boots up.
+	// +optional
+	Job corev1.ObjectReference `json:"job,omitempty"`
 
-    // Config specifies config files and contents on the host with respect to the systemd unit.
-    // The key is the absolute path of the configuration file. And, the value is the file content.
-    // +optional
-    Config map[string]string `json:"config,omitempty"`
+	// Defines a systemd unit.
+	// +optional
+	HostUnit HostSystemdUnit `json:"unit,omitempty"`
+}
+
+type HostSystemdUnit struct {
+	// Path defines the absolute path on the host of the unit.
+	Path string `json:"path,omitempty"`
+
+	// Definition specifies the unit definition. If set, it is written to the unit configuration which Path defines.
+	// Or, the original unit on the host will be used.
+	// +optional
+	Definition string `json:"definition,omitempty"`
+
+	// Config specifies config files and contents on the host with respect to the systemd unit.
+	// The key is the absolute path of the configuration file. And, the value is the file content.
+	// +optional
+	Config map[string]string `json:"config,omitempty"`
 }
 ```
 
@@ -48,11 +62,22 @@ kind: Unit
 metadata:
   name: systemd-timesyncd.service
 spec:
-  path: "/lib/systemd/system/systemd-timesyncd.service"
-  config:
-    "/etc/systemd/timesyncd.conf": |
-      [Time]
-      NTP=ntp1.aliyun.com
+  unit:
+    path: "/lib/systemd/system/systemd-timesyncd.service"
+    config:
+      "/etc/systemd/timesyncd.conf": |
+        [Time]
+        NTP=ntp1.aliyun.com
+---
+apiVersion: core.systemd.warmmetal.tech/v1
+kind: Unit
+metadata:
+  name: binfmt-register
+spec:
+  job:
+    kind: Job
+    name: binfmt-register
+    namespace: default
 ```
 
 After the unit executed, we could see that its status changed.
@@ -65,44 +90,19 @@ kind: Unit
 metadata:
   annotations:
     kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"core.systemd.warmmetal.tech/v1","kind":"Unit","metadata":{"annotations":{},"name":"systemd-timesyncd.service"},"spec":{"config":{"/etc/systemd/timesyncd.conf":"[Time]\nNTP=ntp1.aliyun.com\n"},"path":"/lib/systemd/system/systemd-timesyncd.service"}}
-  creationTimestamp: "2021-03-10T08:52:30Z"
-  generation: 1
-  managedFields:
-  - apiVersion: core.systemd.warmmetal.tech/v1
-    fieldsType: FieldsV1
-    fieldsV1:
-      f:metadata:
-        f:annotations:
-          .: {}
-          f:kubectl.kubernetes.io/last-applied-configuration: {}
-      f:spec:
-        .: {}
-        f:config:
-          .: {}
-          f:/etc/systemd/timesyncd.conf: {}
-        f:path: {}
-    manager: kubectl-client-side-apply
-    operation: Update
-    time: "2021-03-10T08:52:30Z"
-  - apiVersion: core.systemd.warmmetal.tech/v1
-    fieldsType: FieldsV1
-    fieldsV1:
-      f:status:
-        .: {}
-        f:execTimestamp: {}
-    manager: manager
-    operation: Update
-    time: "2021-03-10T08:52:30Z"
+      {"apiVersion":"core.systemd.warmmetal.tech/v1","kind":"Unit","metadata":{"annotations":{},"name":"systemd-timesyncd.service"},"spec":{"unit":{"config":{"/etc/systemd/timesyncd.conf":"[Time]\nNTP=ntp1.aliyun.com\n"},"path":"/lib/systemd/system/systemd-timesyncd.service"}}}
+  creationTimestamp: "2021-06-05T14:20:31Z"
+  generation: 3
   name: systemd-timesyncd.service
-  resourceVersion: "208241"
-  uid: ad1d4311-b26b-4261-8551-f81f659fa2d3
+  resourceVersion: "1179328"
+  uid: f150a842-9804-4313-8f72-99ad3151cf46
 spec:
-  config:
-    /etc/systemd/timesyncd.conf: |
-      [Time]
-      NTP=ntp1.aliyun.com
-  path: /lib/systemd/system/systemd-timesyncd.service
+  unit:
+    config:
+      /etc/systemd/timesyncd.conf: |
+        [Time]
+        NTP=ntp1.aliyun.com
+    path: /lib/systemd/system/systemd-timesyncd.service
 status:
-  execTimestamp: "2021-03-10T09:08:46Z"
+  execTimestamp: "2021-06-05T14:23:43Z"
 ```
