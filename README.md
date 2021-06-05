@@ -8,7 +8,7 @@ With clusters like minikube on hyberkit, which boot always from an ISO,
 **kube-systemd** introduces CRD Unit to save all configurations.
 Users can also set a job instead. The job will restart just after each node boot. 
 
-```yaml
+```
 type Unit struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
